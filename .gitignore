@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build artifacts & Cache
+.cache/
+build/
+DerivedData/
+*.app/
+*.dSYM/
+
+# Test binaries
+test_*
