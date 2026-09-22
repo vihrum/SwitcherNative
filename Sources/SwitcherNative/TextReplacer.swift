@@ -99,6 +99,17 @@ public final class TextReplacer {
         guard AXUIElementCopyAttributeValue(app as! AXUIElement, kAXFocusedUIElementAttribute as CFString, &rawElement) == .success,
               let element = rawElement else { return nil }
 
+        // Must verify that there is an ACTUAL non-zero selection length!
+        // Many apps keep old text in kAXSelectedTextAttribute even when nothing is selected.
+        var rawRange: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element as! AXUIElement, kAXSelectedTextRangeAttribute as CFString, &rawRange) == .success,
+           let rangeValue = rawRange {
+            var range = CFRange()
+            if AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) {
+                guard range.length > 0 else { return nil }
+            }
+        }
+
         var rawText: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element as! AXUIElement, kAXSelectedTextAttribute as CFString, &rawText) == .success,
               let text = rawText as? String, !text.isEmpty else { return nil }

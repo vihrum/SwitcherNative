@@ -144,7 +144,7 @@ public final class KeyboardMonitor {
                 }
                 guard leftCmdAlone else { return }
                 let duration = now - leftCmdDownTimestamp
-                guard duration > 0.015 && duration < 0.5 else { return }
+                guard duration > 0.01 && duration < 0.65 else { return }
 
                 switch mode {
                 case .leftCommand:
@@ -209,10 +209,10 @@ public final class KeyboardMonitor {
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let flags   = event.flags
 
-        // Cmd+anything = shortcut, reset state
+        // Cmd+anything = shortcut, cancel solo Cmd tap
         if flags.contains(.maskCommand) {
             leftCmdAlone = false
-            resetWordState()
+            currentWordBuffer = ""
             return
         }
 
