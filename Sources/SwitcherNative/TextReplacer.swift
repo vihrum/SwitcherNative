@@ -15,8 +15,8 @@ public final class TextReplacer {
 
     // MARK: - Word replacement
 
-    /// Deletes `backspaceCount` characters then types `newText`.
-    /// All events are tagged so our CGEventTap skips them.
+    /// Deletes `backspaceCount` characters in CURRENT layout, THEN switches layout, THEN types `newText`.
+    /// This prevents dropped backspaces caused by macOS freezing input queues during layout transitions.
     public func replaceLastWord(
         backspaceCount: Int,
         newText: String,
@@ -24,15 +24,24 @@ public final class TextReplacer {
     ) {
         guard backspaceCount > 0, !newText.isEmpty else { return }
 
-        // Switch layout synchronously before emitting events
-        LayoutManager.shared.switchTo(language: targetLanguage)
-
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self else { return }
-            // Pause to let macOS input architecture finish switching layout and release physical modifiers
-            usleep(45_000)
+
+            // 1. Delete the incorrect word FIRST while the application is in its current, stable state
             self.emitBackspaces(count: backspaceCount)
-            usleep(35_000)  // gap so target app finishes deleting before typing begins
+
+            // 2. Small settling delay after deleting
+            usleep(20_000)
+
+            // 3. Switch layout on the main thread
+            DispatchQueue.main.async {
+                LayoutManager.shared.switchTo(language: targetLanguage)
+            }
+
+            // 4. Wait for macOS WindowServer to finish applying the new input source
+            usleep(40_000)
+
+            // 5. Type the clean, converted text
             self.emitString(newText)
         }
     }
@@ -57,17 +66,19 @@ public final class TextReplacer {
             guard let down = CGEvent(keyboardEventSource: src, virtualKey: 51, keyDown: true),
                   let up   = CGEvent(keyboardEventSource: src, virtualKey: 51, keyDown: false)
             else { continue }
-            // Critical: strip ALL modifier flags so app doesn't see Cmd+Backspace or Shift+Backspace!
+            // Strip modifier flags so app doesn't see Cmd+Backspace or Shift+Backspace!
             down.flags = []
             up.flags   = []
-            // Explicitly clear unicode string so virtualKey 51 is never mistranslated into ASCII '2' or '3'
             down.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
             up.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
             down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
+            
+            // Post keyDown, hold briefly, then post keyUp
             down.post(tap: .cghidEventTap)
+            usleep(3_000)  // 3 ms key hold time
             up.post(tap: .cghidEventTap)
-            usleep(6_000)  // 6 ms between backspaces
+            usleep(5_000)  // 5 ms gap between strokes
         }
     }
 
@@ -85,8 +96,9 @@ public final class TextReplacer {
             down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             down.post(tap: .cghidEventTap)
+            usleep(2_000)  // 2 ms hold
             up.post(tap: .cghidEventTap)
-            usleep(3_000)
+            usleep(3_000)  // 3 ms gap
         }
     }
 
