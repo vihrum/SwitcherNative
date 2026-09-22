@@ -8,9 +8,8 @@ let kSyntheticEventMarker: Int64 = 0x5357_4954_4348  // "SWITCH"
 public final class TextReplacer {
     public static let shared = TextReplacer()
 
-    // Private event source — combinedSessionState is cheaper than hidSystemState
-    // for generating synthetic events
-    private let eventSource = CGEventSource(stateID: .combinedSessionState)
+    // Use hidSystemState so synthetic events are clean and not mixed with session state
+    private let eventSource = CGEventSource(stateID: .hidSystemState)
 
     private init() {}
 
@@ -30,10 +29,10 @@ public final class TextReplacer {
 
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self else { return }
-            // Small pause to let any physically held Command key release in the OS event queue
-            usleep(25_000)
+            // Pause to let macOS input architecture finish switching layout and release physical modifiers
+            usleep(45_000)
             self.emitBackspaces(count: backspaceCount)
-            usleep(20_000)  // gap so target app finishes deleting
+            usleep(35_000)  // gap so target app finishes deleting before typing begins
             self.emitString(newText)
         }
     }
@@ -61,11 +60,14 @@ public final class TextReplacer {
             // Critical: strip ALL modifier flags so app doesn't see Cmd+Backspace or Shift+Backspace!
             down.flags = []
             up.flags   = []
+            // Explicitly clear unicode string so virtualKey 51 is never mistranslated into ASCII '2' or '3'
+            down.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
+            up.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
             down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
-            usleep(5_000)  // 5 ms between backspaces
+            usleep(6_000)  // 6 ms between backspaces
         }
     }
 
@@ -84,7 +86,7 @@ public final class TextReplacer {
             up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
-            usleep(2_500)
+            usleep(3_000)
         }
     }
 
