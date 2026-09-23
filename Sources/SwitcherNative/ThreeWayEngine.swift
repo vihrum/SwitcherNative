@@ -146,8 +146,8 @@ public final class ThreeWayEngine {
             return nil
         }
 
-        // Skip words with numbers or strange characters
-        guard trimmed.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" || $0 == "’" }) else {
+        // Skip words with numbers or strange characters, but allow all keys that correspond to letters in both layouts
+        guard trimmed.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" || $0 == "’" || KeyMapping.enToUaMap[$0] != nil || KeyMapping.uaToEnMap[$0] != nil }) else {
             return nil
         }
 

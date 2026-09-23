@@ -39,15 +39,13 @@ public final class TextReplacer {
             self.emitBackspaces(count: backspaceCount)
 
             // 2. Small settling delay after deleting
-            usleep(20_000)
+            usleep(25_000)
 
-            // 3. Switch layout on the main thread
-            DispatchQueue.main.async {
-                LayoutManager.shared.switchTo(language: targetLanguage)
-            }
+            // 3. Switch layout synchronously so the next typed characters are in the new layout
+            LayoutManager.shared.switchTo(language: targetLanguage)
 
             // 4. Wait for macOS WindowServer to finish applying the new input source
-            usleep(40_000)
+            usleep(45_000)
 
             // 5. Type the clean, converted text
             self.emitString(newText)
@@ -84,9 +82,9 @@ public final class TextReplacer {
             
             // Post keyDown, hold briefly, then post keyUp
             down.post(tap: .cghidEventTap)
-            usleep(3_000)  // 3 ms key hold time
+            usleep(4_000)  // 4 ms key hold time
             up.post(tap: .cghidEventTap)
-            usleep(5_000)  // 5 ms gap between strokes
+            usleep(8_000)  // 8 ms gap between strokes (total 12ms per backspace)
         }
     }
 
@@ -104,9 +102,9 @@ public final class TextReplacer {
             down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             down.post(tap: .cghidEventTap)
-            usleep(2_000)  // 2 ms hold
+            usleep(3_000)  // 3 ms hold
             up.post(tap: .cghidEventTap)
-            usleep(3_000)  // 3 ms gap
+            usleep(4_000)  // 4 ms gap
         }
     }
 
