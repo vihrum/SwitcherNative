@@ -88,6 +88,9 @@ public final class KeyboardMonitor {
         print("[KeyboardMonitor] Event tap stopped.")
     }
 
+    // Global barrier flag: true when TextReplacer is actively deleting and typing
+    public static var isReplacing = false
+
     // MARK: - Core event handler (called on main RunLoop)
 
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -97,7 +100,12 @@ public final class KeyboardMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        // Skip synthetic events we generated (TextReplacer backspaces / typed chars)
+        // Absolute barrier: while TextReplacer is modifying text, ignore all events completely
+        if KeyboardMonitor.isReplacing {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Skip synthetic events we generated (backup check)
         if event.getIntegerValueField(.eventSourceUserData) == kSyntheticEventMarker {
             return Unmanaged.passUnretained(event)
         }
@@ -365,8 +373,8 @@ public final class KeyboardMonitor {
             return
         }
 
-        // 3. Text selected → convert; nothing → just toggle layout
-        TextReplacer.shared.convertSelectedTextOrToggle()
+        // 3. No word in buffer → simply toggle the input layout cleanly without touching clipboard
+        _ = LayoutManager.shared.toggleLanguage()
     }
 
     // MARK: - Helpers

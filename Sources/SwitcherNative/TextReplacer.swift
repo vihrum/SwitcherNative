@@ -27,6 +27,14 @@ public final class TextReplacer {
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let self else { return }
 
+            // Set barrier so KeyboardMonitor completely ignores all synthetic backspaces and chars
+            KeyboardMonitor.isReplacing = true
+            defer {
+                // Ensure barrier is released after typing finishes
+                usleep(15_000)
+                KeyboardMonitor.isReplacing = false
+            }
+
             // 1. Delete the incorrect word FIRST while the application is in its current, stable state
             self.emitBackspaces(count: backspaceCount)
 
