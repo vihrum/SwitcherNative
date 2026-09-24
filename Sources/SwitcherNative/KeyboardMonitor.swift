@@ -318,6 +318,8 @@ public final class KeyboardMonitor {
         let backspaceCount = word.count + 1
         let replacementText = decision.convertedText + delimiter
 
+        print("[AutoSwitch] '\(word)' -> '\(decision.convertedText)' (switched to \(decision.targetLanguage.displayName))")
+
         TextReplacer.shared.replaceLastWord(
             backspaceCount: backspaceCount,
             newText: replacementText,
@@ -344,7 +346,8 @@ public final class KeyboardMonitor {
         if !currentWordBuffer.isEmpty {
             let text = currentWordBuffer
             let decision = ThreeWayEngine.shared.cycleText(text, currentLanguage: currentLang)
-            
+            print("[ForceSwitch ⌘ mid-word] '\(text)' -> '\(decision.convertedText)' (\(decision.targetLanguage.displayName))")
+
             // Allow repeated Command tap to undo/toggle back
             currentWordBuffer = ""
             lastCompletedWord = decision.convertedText
@@ -364,6 +367,7 @@ public final class KeyboardMonitor {
             let text  = lastCompletedWord
             let delim = lastDelimiter
             let decision = ThreeWayEngine.shared.cycleText(text, currentLanguage: currentLang)
+            print("[ForceSwitch ⌘ last-word] '\(text)' -> '\(decision.convertedText)' (\(decision.targetLanguage.displayName))")
 
             // Keep updated so repeated Command tap flips it back immediately
             lastCompletedWord = decision.convertedText
