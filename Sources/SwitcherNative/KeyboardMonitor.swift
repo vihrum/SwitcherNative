@@ -328,9 +328,16 @@ public final class KeyboardMonitor {
         lastCompletedWord = decision.convertedText
     }
 
+    // Debounce to prevent key bounce or accidental double triggering within milliseconds
+    private var lastForceSwitchTimestamp: TimeInterval = 0
+
     // MARK: - Force switch (Left Command hotkey)
 
     public func triggerForceSwitchAndConvert() {
+        let now = CACurrentMediaTime()
+        guard now - lastForceSwitchTimestamp > 0.28 else { return }
+        lastForceSwitchTimestamp = now
+
         let currentLang = LayoutManager.shared.currentLanguage()
 
         // 1. Currently mid-word in buffer
@@ -353,7 +360,6 @@ public final class KeyboardMonitor {
         }
 
         // 2. Just finished a word (within last 8 seconds)
-        let now = CACurrentMediaTime()
         if !lastCompletedWord.isEmpty && (now - lastCompletedWordTimestamp < 8.0) {
             let text  = lastCompletedWord
             let delim = lastDelimiter

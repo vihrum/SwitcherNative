@@ -105,7 +105,7 @@ public final class TextReplacer {
         up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
 
         down.post(tap: .cghidEventTap)
-        usleep(4_000)
+        usleep(6_000)
         up.post(tap: .cghidEventTap)
     }
 
