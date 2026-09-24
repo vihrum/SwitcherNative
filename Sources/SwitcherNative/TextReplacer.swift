@@ -75,8 +75,6 @@ public final class TextReplacer {
             // Strip modifier flags so app doesn't see Cmd+Backspace or Shift+Backspace!
             down.flags = []
             up.flags   = []
-            down.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
-            up.keyboardSetUnicodeString(stringLength: 0, unicodeString: nil)
             down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
             
@@ -89,23 +87,26 @@ public final class TextReplacer {
     }
 
     private func emitString(_ text: String) {
+        guard !text.isEmpty else { return }
         let src = eventSource
-        for scalar in text.unicodeScalars {
-            var c = scalar.utf16.first ?? 0
-            guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
-                  let up   = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false)
-            else { continue }
-            down.flags = []
-            up.flags   = []
-            down.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c)
-            up.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c)
-            down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
-            up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
-            down.post(tap: .cghidEventTap)
-            usleep(3_000)  // 3 ms hold
-            up.post(tap: .cghidEventTap)
-            usleep(4_000)  // 4 ms gap
-        }
+        var utf16 = Array(text.utf16)
+
+        // Atomic text insertion: send the entire word in a SINGLE CGEvent!
+        // This eliminates letter-by-letter lag and completely prevents macOS predictive engine from inserting phantom '1' or '2' digits.
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+              let up   = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false)
+        else { return }
+
+        down.flags = []
+        up.flags   = []
+        down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+        up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+        down.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
+        up.setIntegerValueField(.eventSourceUserData, value: kSyntheticEventMarker)
+
+        down.post(tap: .cghidEventTap)
+        usleep(4_000)
+        up.post(tap: .cghidEventTap)
     }
 
     private func getSelectedText() -> String? {
