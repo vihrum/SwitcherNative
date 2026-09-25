@@ -6,6 +6,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var currentLanguageItem: NSMenuItem!
     private var autoSwitchItem: NSMenuItem!
+    private var wordsSubmenuItem: NSMenuItem!
+    private var permissionRetryCount = 0
+    private let maxPermissionRetries = 15
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -23,10 +26,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateLanguageDisplay()
             }
         }
+
+        // Re-check permissions when application becomes active (user returns from System Settings)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            if !KeyboardMonitor.shared.isStarted && AXIsProcessTrusted() {
+                _ = KeyboardMonitor.shared.start()
+            }
+        }
     }
 
     private func setupStatusBar() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if statusItem == nil {
+            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        }
 
         if let button = statusItem.button {
             if let image = NSImage(systemSymbolName: "globe", accessibilityDescription: "SwitcherNative") {
@@ -73,7 +89,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(hotkeySubmenuItem)
 
         // Excluded Words submenu
-        let wordsSubmenuItem = NSMenuItem(title: "Слова-виключення", action: nil, keyEquivalent: "")
+        wordsSubmenuItem = NSMenuItem(title: "Слова-виключення", action: nil, keyEquivalent: "")
         wordsSubmenuItem.submenu = makeExcludedWordsMenu()
         menu.addItem(wordsSubmenuItem)
 
@@ -156,7 +172,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMenu() {
-        setupStatusBar()
+        wordsSubmenuItem?.submenu = makeExcludedWordsMenu()
     }
 
     private func updateLanguageDisplay() {
@@ -187,8 +203,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         } else {
-            print("[AppDelegate] Accessibility NOT granted. Will retry in 2s...")
-            // Poll every 2 seconds until user grants access
+            print("[AppDelegate] Accessibility NOT granted. Showing prompt and polling...")
+            promptPermissionsAlert()
+            permissionRetryCount = 0
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.retryStartUntilGranted()
             }
@@ -201,9 +218,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             let started = KeyboardMonitor.shared.start()
             print("[AppDelegate] Permission granted, monitor started: \(started)")
         } else {
-            // Keep polling silently
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.retryStartUntilGranted()
+            permissionRetryCount += 1
+            if permissionRetryCount < maxPermissionRetries {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.retryStartUntilGranted()
+                }
+            } else {
+                print("[AppDelegate] Stopped polling permissions. Will recheck when app becomes active.")
             }
         }
     }

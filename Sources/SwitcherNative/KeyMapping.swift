@@ -25,6 +25,12 @@ public struct KeyMapping {
         for (en, ua) in enToUaMap {
             map[ua] = en
         }
+        // Explicitly set deterministic reverse mappings for multi-mapped characters
+        map["ґ"] = "\\"
+        map["Ґ"] = "|"
+        map["'"] = "`"
+        map["’"] = "`"
+        map["ʼ"] = "`"
         // Russian letters accessible via Option in Apple Ukrainian layout
         map["ы"] = "s";  map["Ы"] = "S"
         map["э"] = "'";  map["Э"] = "\""

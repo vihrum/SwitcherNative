@@ -100,7 +100,8 @@ public final class ThreeWayEngine {
             return false
         }
 
-        let cacheKey = "\(word)|\(locale)"
+        let normalizedWord = word.replacingOccurrences(of: "’", with: "'").replacingOccurrences(of: "ʼ", with: "'")
+        let cacheKey = "\(normalizedWord)|\(locale)"
 
         lock.lock()
         if let cached = cache[cacheKey] {
@@ -110,7 +111,7 @@ public final class ThreeWayEngine {
         lock.unlock()
 
         let range = spellChecker.checkSpelling(
-            of: word,
+            of: normalizedWord,
             startingAt: 0,
             language: locale,
             wrap: false,
@@ -120,8 +121,10 @@ public final class ThreeWayEngine {
         let valid = (range.location == NSNotFound)
 
         lock.lock()
-        if cache.count >= cacheMaxSize, let first = cache.keys.first {
-            cache.removeValue(forKey: first)
+        if cache.count >= cacheMaxSize {
+            // Batch purge oldest 25% of entries to avoid per-word eviction overhead
+            let toRemove = Array(cache.keys.prefix(cacheMaxSize / 4))
+            for k in toRemove { cache.removeValue(forKey: k) }
         }
         cache[cacheKey] = valid
         lock.unlock()
@@ -147,15 +150,19 @@ public final class ThreeWayEngine {
         }
 
         // Skip words with numbers or strange characters, but allow all keys that correspond to letters in both layouts
-        guard trimmed.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" || $0 == "’" || KeyMapping.enToUaMap[$0] != nil || KeyMapping.uaToEnMap[$0] != nil }) else {
+        guard trimmed.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" || $0 == "’" || $0 == "ʼ" || KeyMapping.enToUaMap[$0] != nil || KeyMapping.uaToEnMap[$0] != nil }) else {
             return nil
         }
 
-        // 1. If text is typed in Latin characters (e.g. "gthtlevjdf")
+        // 1. Text is typed in Latin characters (e.g. "gthtlevjdf")
         if KeyMapping.isLatin(trimmed) {
-            // Check if it's a valid English word
+            // If current language is English and this is a valid English word, don't switch
+            if currentLanguage == .english && isValidWord(trimmed, locale: resolvedEnLocale) {
+                return nil
+            }
+            // Even if current layout was Ukrainian, check if it's valid English
             if isValidWord(trimmed, locale: resolvedEnLocale) {
-                return nil // Correct English word, don't switch
+                return nil
             }
 
             // Convert to Ukrainian
@@ -166,11 +173,15 @@ public final class ThreeWayEngine {
             return nil
         }
 
-        // 2. If text is typed in Cyrillic characters (e.g. "руддщ")
+        // 2. Text is typed in Cyrillic characters (e.g. "руддщ")
         if KeyMapping.isCyrillic(trimmed) {
-            // Check if it's already valid in Ukrainian or Russian
+            // If current language is Ukrainian and word is valid, don't switch
+            if currentLanguage == .ukrainian && (isValidWord(trimmed, locale: resolvedUkLocale) || isValidWord(trimmed, locale: resolvedRuLocale)) {
+                return nil
+            }
+            // Even if current layout was English, check if it's already valid in Ukrainian/Russian
             if isValidWord(trimmed, locale: resolvedUkLocale) || isValidWord(trimmed, locale: resolvedRuLocale) {
-                return nil // Correct Cyrillic word, don't switch
+                return nil
             }
 
             // Convert to English

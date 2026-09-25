@@ -27,6 +27,10 @@ public final class KeyboardMonitor {
     private var cachedFrontBundle: String? = nil
     private var isFrontAppExcluded = false
 
+    private let switchQueue = DispatchQueue(label: "ua.switcher.native.switchQueue", qos: .userInteractive)
+
+    public var isStarted: Bool { eventTap != nil }
+
     private init() {
         // Update exclusion cache whenever the frontmost app changes
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -46,7 +50,10 @@ public final class KeyboardMonitor {
         guard eventTap == nil else { return true }
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) |
-                                (1 << CGEventType.flagsChanged.rawValue)
+                                (1 << CGEventType.flagsChanged.rawValue) |
+                                (1 << CGEventType.leftMouseDown.rawValue) |
+                                (1 << CGEventType.rightMouseDown.rawValue) |
+                                (1 << CGEventType.otherMouseDown.rawValue)
 
         let callback: CGEventTapCallBack = { _, type, event, refcon -> Unmanaged<CGEvent>? in
             guard let refcon else { return Unmanaged.passUnretained(event) }
@@ -88,8 +95,22 @@ public final class KeyboardMonitor {
         print("[KeyboardMonitor] Event tap stopped.")
     }
 
-    // Global barrier flag: true when TextReplacer is actively deleting and typing
-    public static var isReplacing = false
+    // Thread-safe barrier flag: true when TextReplacer is actively deleting and typing
+    private static var _isReplacing = false
+    private static var isReplacingLock = os_unfair_lock_s()
+
+    public static var isReplacing: Bool {
+        get {
+            os_unfair_lock_lock(&isReplacingLock)
+            defer { os_unfair_lock_unlock(&isReplacingLock) }
+            return _isReplacing
+        }
+        set {
+            os_unfair_lock_lock(&isReplacingLock)
+            _isReplacing = newValue
+            os_unfair_lock_unlock(&isReplacingLock)
+        }
+    }
 
     // MARK: - Core event handler (called on main RunLoop)
 
@@ -97,6 +118,12 @@ public final class KeyboardMonitor {
         // Re-enable tap if system disabled it
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Cancel solo command tap on mouse clicks to avoid Cmd+Click triggering switcher
+        if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
+            leftCmdAlone = false
             return Unmanaged.passUnretained(event)
         }
 
@@ -278,11 +305,25 @@ public final class KeyboardMonitor {
                                char == "," || char == "." || char == "/" || char == "`" ||
                                char == "’" || char == "«" || char == "»")
 
-        let isDelimiter = (keyCode == 49)   // space
-                       || (keyCode == 36)   // return
-                       || (keyCode == 48)   // tab
-                       || char.isWhitespace
-                       || (!isLetterKeyInUa && (char.isPunctuation || char.isSymbol))
+        let isWhitespaceOrReturn = (keyCode == 49)   // space
+                                || (keyCode == 36)   // return
+                                || (keyCode == 48)   // tab
+                                || char.isWhitespace
+
+        let currentLang = LayoutManager.shared.currentLanguage()
+        let isDelimiter: Bool
+        if isWhitespaceOrReturn {
+            isDelimiter = true
+        } else if currentLang == .english && (char == "." || char == "," || char == "!" || char == "?" || char == ":") {
+            // When in English, if the buffer forms a recognized English word, period/comma is delimiter
+            if !currentWordBuffer.isEmpty && ThreeWayEngine.shared.isValidWord(currentWordBuffer, locale: "en") {
+                isDelimiter = true
+            } else {
+                isDelimiter = false
+            }
+        } else {
+            isDelimiter = !isLetterKeyInUa && (char.isPunctuation || char.isSymbol)
+        }
 
         if isDelimiter {
             if !currentWordBuffer.isEmpty {
@@ -305,29 +346,42 @@ public final class KeyboardMonitor {
         }
     }
 
-    // MARK: - Auto-switch on completed word
+    // MARK: - Auto-switch on completed word (asynchronous evaluation to protect CGEventTap timing)
 
     private func checkAndAutoSwitch(word: String, delimiter: String) {
         let currentLang = LayoutManager.shared.currentLanguage()
+        let capturedWord = word
+        let capturedDelimiter = delimiter
+        let wordTimestamp = self.lastCompletedWordTimestamp
 
-        guard let decision = ThreeWayEngine.shared.evaluateWord(word, currentLanguage: currentLang) else {
-            return
+        switchQueue.async { [weak self] in
+            guard let self else { return }
+            guard let decision = ThreeWayEngine.shared.evaluateWord(capturedWord, currentLanguage: currentLang) else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                // If user typed further in the meantime, abort replacement to prevent corrupting input
+                guard self.lastCompletedWordTimestamp == wordTimestamp else { return }
+
+                // +1 for the delimiter character
+                let backspaceCount = capturedWord.count + 1
+                let replacementText = decision.convertedText + capturedDelimiter
+
+                #if DEBUG
+                print("[AutoSwitch] '\(capturedWord)' -> '\(decision.convertedText)' (switched to \(decision.targetLanguage.displayName))")
+                #endif
+
+                TextReplacer.shared.replaceLastWord(
+                    backspaceCount: backspaceCount,
+                    newText: replacementText,
+                    targetLanguage: decision.targetLanguage
+                )
+
+                // Update buffer so hotkey-based correction still works correctly
+                self.lastCompletedWord = decision.convertedText
+            }
         }
-
-        // +1 for the delimiter character
-        let backspaceCount = word.count + 1
-        let replacementText = decision.convertedText + delimiter
-
-        print("[AutoSwitch] '\(word)' -> '\(decision.convertedText)' (switched to \(decision.targetLanguage.displayName))")
-
-        TextReplacer.shared.replaceLastWord(
-            backspaceCount: backspaceCount,
-            newText: replacementText,
-            targetLanguage: decision.targetLanguage
-        )
-
-        // Update buffer so hotkey-based correction still works correctly
-        lastCompletedWord = decision.convertedText
     }
 
     // Debounce to prevent key bounce or accidental double triggering within milliseconds
@@ -342,11 +396,20 @@ public final class KeyboardMonitor {
 
         let currentLang = LayoutManager.shared.currentLanguage()
 
+        // 0. Selected text conversion via Accessibility API (prioritized over word buffer)
+        if let selected = TextReplacer.shared.getSelectedText(), !selected.isEmpty {
+            TextReplacer.shared.convertSelectedText(selected)
+            resetWordState()
+            return
+        }
+
         // 1. Currently mid-word in buffer
         if !currentWordBuffer.isEmpty {
             let text = currentWordBuffer
             let decision = ThreeWayEngine.shared.cycleText(text, currentLanguage: currentLang)
+            #if DEBUG
             print("[ForceSwitch ⌘ mid-word] '\(text)' -> '\(decision.convertedText)' (\(decision.targetLanguage.displayName))")
+            #endif
 
             // Allow repeated Command tap to undo/toggle back
             currentWordBuffer = ""
@@ -367,7 +430,9 @@ public final class KeyboardMonitor {
             let text  = lastCompletedWord
             let delim = lastDelimiter
             let decision = ThreeWayEngine.shared.cycleText(text, currentLanguage: currentLang)
+            #if DEBUG
             print("[ForceSwitch ⌘ last-word] '\(text)' -> '\(decision.convertedText)' (\(decision.targetLanguage.displayName))")
+            #endif
 
             // Keep updated so repeated Command tap flips it back immediately
             lastCompletedWord = decision.convertedText

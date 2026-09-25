@@ -111,7 +111,7 @@ public final class TextReplacer {
         up.post(tap: .cghidEventTap)
     }
 
-    private func getSelectedText() -> String? {
+    public func getSelectedText() -> String? {
         let system = AXUIElementCreateSystemWide()
 
         var rawApp: CFTypeRef?
@@ -140,7 +140,7 @@ public final class TextReplacer {
         return text
     }
 
-    private func convertSelectedText(_ selectedText: String) {
+    public func convertSelectedText(_ selectedText: String) {
         let pasteboard = NSPasteboard.general
 
         // Snapshot current clipboard
@@ -162,8 +162,8 @@ public final class TextReplacer {
         pasteboard.setString(decision.convertedText, forType: .string)
         simulateKey(keyCode: 9, flags: .maskCommand)  // Cmd+V
 
-        // Restore original clipboard after paste completes
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.4) {
+        // Restore original clipboard on main thread after paste completes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             guard let saved = snapshot, !saved.isEmpty else { return }
             pasteboard.clearContents()
             for dict in saved {
