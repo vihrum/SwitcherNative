@@ -41,8 +41,10 @@ public final class TextReplacer {
             // 2. Small settling delay after deleting
             usleep(25_000)
 
-            // 3. Switch layout synchronously so the next typed characters are in the new layout
-            LayoutManager.shared.switchTo(language: targetLanguage)
+            // 3. Switch layout on the main thread as strictly mandated by macOS Carbon / TIS API
+            DispatchQueue.main.sync {
+                LayoutManager.shared.switchTo(language: targetLanguage)
+            }
 
             // 4. Wait for macOS WindowServer to finish applying the new input source
             usleep(45_000)

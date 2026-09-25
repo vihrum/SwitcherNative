@@ -23,6 +23,10 @@ public final class LayoutManager {
 
     /// Returns all enabled keyboard sources (both KeyboardLayout and InputMode)
     public func installedKeyboardSources() -> [TISInputSource] {
+        if !Thread.isMainThread {
+            return DispatchQueue.main.sync { self.installedKeyboardSources() }
+        }
+
         lock.lock()
         defer { lock.unlock() }
 
@@ -111,6 +115,13 @@ public final class LayoutManager {
     }
 
     public func switchTo(language: SupportedLanguage) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.sync {
+                self.switchTo(language: language)
+            }
+            return
+        }
+
         let sources = installedKeyboardSources()
         guard !sources.isEmpty else {
             print("[LayoutManager] ERROR: No keyboard sources found!")
